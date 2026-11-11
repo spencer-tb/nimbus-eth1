@@ -1579,6 +1579,19 @@ proc rpcMain*() =
 
     env.close()
 
+  suite "Remote Procedure Calls - Osaka":
+    var env = setupEnv(Osaka)
+    let client = env.client
+
+    test "eth_estimateGas is capped at the EIP-7825 transaction gas limit":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveTxGasCapAddress))
+      expect RpcResponseError:
+        discard await client.eth_estimateGas(ec)
+
+    env.close()
+
   suite "Remote Procedure Calls - RPC gas cap below the block gas limit":
     const blockGasLimit = 60_000_000'u64
     var env = setupEnv(Prague, genesisGasLimit = blockGasLimit.GasInt)

@@ -107,6 +107,11 @@ proc rpcEstimateGas*(
     # block's gasLimit act as the gas ceiling
     hi = header.gasLimit
 
+  # EIP-7825 caps the gas limit of a transaction at Osaka. After Amsterdam
+  # (EIP-8037) a larger gas limit only feeds the state gas reservoir.
+  if fork == FkOsaka and hi > TX_MAX_GAS_LIMIT.GasInt:
+    hi = TX_MAX_GAS_LIMIT.GasInt
+
   let feeCap = params.effectiveGasPrice
 
   # Recap the highest gas limit with account's available balance.
