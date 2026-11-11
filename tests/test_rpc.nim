@@ -216,6 +216,15 @@ const
     Pop
     Stop
   precheckFailerAddress = address"0x000000000000000000000000000000000000ca04"
+  # Returns the gas left at entry.
+  gasLeftCode = evmByteCode:
+    Gas
+    Push0
+    Mstore
+    Push1 "0x20"
+    Push0
+    Return
+  gasLeftAddress = address"0x000000000000000000000000000000000000c0e1"
   # Init code that creates two contracts of 24,576 zero bytes each and
   # ignores the results. After Amsterdam (EIP-8037) each code deposit needs
   # more state gas than TX_MAX_GAS_LIMIT. The child init code is
@@ -392,6 +401,7 @@ proc setupEnv(envFork: HardFork = MergeFork, genesisGasLimit = 0.GasInt): TestEn
     GenesisAccount(code: aboveTxGasCapCode)
   params.genesis.alloc[precheckFailerAddress] =
     GenesisAccount(code: precheckFailerCode)
+  params.genesis.alloc[gasLeftAddress] = GenesisAccount(code: gasLeftCode)
   params.genesis.alloc[signer] = GenesisAccount(balance: oneETH)
   params.genesis.alloc[create2Deployer] =
     GenesisAccount(code: create2DeployerCode, nonce: 1)
@@ -1692,6 +1702,24 @@ proc rpcMain*() =
         gas: Opt.some(w3Qty(55_000_000'u64)))
       let res = await client.eth_call(ec, "latest")
       check UInt256.fromBytesBE(res) >= 52_000_000.u256
+
+    test "eth_call without gas defaults to the RPC gas cap":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(gasLeftAddress))
+      let res = await client.eth_call(ec, "latest")
+      check UInt256.fromBytesBE(res) < DEFAULT_RPC_GAS_CAP.u256
+
+    test "eth_call with gas above the block gas limit is capped at the block gas limit":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(gasLeftAddress),
+        gas: Opt.some(w3Qty(100_000_000'u64)))
+      let
+        res = await client.eth_call(ec, "latest")
+        left = UInt256.fromBytesBE(res)
+      check left > DEFAULT_RPC_GAS_CAP.u256
+      check left < blockGasLimit.u256
 
     test "eth_estimateGas search reaches the block gas limit":
       let ec = TransactionArgs(
