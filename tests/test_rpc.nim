@@ -157,6 +157,25 @@ const
     Push1 "0x00"
     Return
   reservoirCatcherAddress = address"0x000000000000000000000000000000000000ca03"
+  # Returns the gas left at entry if it is at least 52M, above the 50M RPC
+  # gas cap, and reverts otherwise.
+  aboveRpcGasCapCode = evmByteCode:
+    Gas
+    Push4 "0x03197500"
+    Dup2
+    Lt
+    Push1 "0x11"
+    JumpI
+    Push0
+    Mstore
+    Push1 "0x20"
+    Push0
+    Return
+    JumpDest
+    Push0
+    Push0
+    Revert
+  aboveRpcGasCapAddress = address"0x000000000000000000000000000000000000c0de"
   keyStore = "tests/keystore"
   signer = address"0x0e69cde81b1aa07a45c32c6cd85d67229d36bb1b"
   contractAddress = address"0xa3b2222afa5c987da6ef773fde8d01b9f23d481f"
@@ -288,12 +307,15 @@ proc makeBlobTx(env: var TestEnv, nonce: int): PooledTransaction =
       commitments: @[pooled_txs.KzgCommitment(commitment.bytes)],
       proofs: @[pooled_txs.KzgProof(proof.bytes)]))
 
-proc setupEnv(envFork: HardFork = MergeFork): TestEnv =
+proc setupEnv(envFork: HardFork = MergeFork, genesisGasLimit = 0.GasInt): TestEnv =
   doAssert(envFork >= MergeFork)
 
   let
     conf  = setupConfig()
     params = conf.computeNetworkParams()
+
+  if genesisGasLimit != 0:
+    params.genesis.gasLimit = genesisGasLimit
 
   params.genesis.alloc[contractAddress] = GenesisAccount(code: contractCode)
   params.genesis.alloc[blockNumberAddress] = GenesisAccount(code: blockNumberCode)
@@ -305,6 +327,8 @@ proc setupEnv(envFork: HardFork = MergeFork): TestEnv =
   params.genesis.alloc[storerAddress] = GenesisAccount(code: storerCode)
   params.genesis.alloc[reservoirCatcherAddress] =
     GenesisAccount(code: reservoirCatcherCode)
+  params.genesis.alloc[aboveRpcGasCapAddress] =
+    GenesisAccount(code: aboveRpcGasCapCode)
   params.genesis.alloc[signer] = GenesisAccount(balance: oneETH)
   params.genesis.alloc[create2Deployer] =
     GenesisAccount(code: create2DeployerCode, nonce: 1)
@@ -1058,6 +1082,16 @@ proc rpcMain*() =
       let gas = await client.eth_estimateGas(ec)
       check gas <= w3Qty(100_000'u64)
 
+    test "eth_estimateGas with gas above the RPC gas cap and the block gas limit stays capped":
+      # The block gas limit is below the 50M RPC gas cap, so the search stops
+      # at the cap, below what the contract needs.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveRpcGasCapAddress),
+        gas: Opt.some(w3Qty(100_000_000'u64)))
+      expect RpcResponseError:
+        discard await client.eth_estimateGas(ec)
+
     test "eth_getBlockByHash":
       let res = await client.eth_getBlockByHash(env.blockHash, true)
       check res.isNil.not
@@ -1502,6 +1536,39 @@ proc rpcMain*() =
         to: Opt.some(reservoirCatcherAddress))
       let gas = await client.eth_estimateGas(ec)
       check gas < w3Qty(TX_MAX_GAS_LIMIT.uint64)
+
+    env.close()
+
+  suite "Remote Procedure Calls - RPC gas cap below the block gas limit":
+    const blockGasLimit = 60_000_000'u64
+    var env = setupEnv(Prague, genesisGasLimit = blockGasLimit.GasInt)
+    let client = env.client
+    doAssert DEFAULT_RPC_GAS_CAP.uint64 < 52_000_000'u64
+
+    test "eth_call with gas above the RPC gas cap":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveRpcGasCapAddress),
+        gas: Opt.some(w3Qty(55_000_000'u64)))
+      let res = await client.eth_call(ec, "latest")
+      check UInt256.fromBytesBE(res) >= 52_000_000.u256
+
+    test "eth_estimateGas search reaches the block gas limit":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveRpcGasCapAddress))
+      let gas = await client.eth_estimateGas(ec)
+      check gas >= w3Qty(52_000_000'u64)
+      check gas <= w3Qty(blockGasLimit)
+
+    test "eth_estimateGas with gas above the block gas limit searches up to the block gas limit":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveRpcGasCapAddress),
+        gas: Opt.some(w3Qty(100_000_000'u64)))
+      let gas = await client.eth_estimateGas(ec)
+      check gas >= w3Qty(52_000_000'u64)
+      check gas <= w3Qty(blockGasLimit)
 
     env.close()
 

@@ -80,6 +80,11 @@ proc rpcCallEvm*(
 proc rpcEstimateGas*(
     args: TransactionArgs, header: Header, vmState: BaseVMState, gasCap: GasInt
 ): Result[GasInt, OutputResult] =
+  # A transaction that fits in the block can be included, so the gas cap never
+  # limits the search below the gas limit of the block. `header` is the
+  # requested block's own header.
+  let gasCap = if gasCap == 0: gasCap else: max(gasCap, header.gasLimit)
+
   # Binary search the gas requirement, as it may be higher than the amount used
   let
     fork = vmState.fork
