@@ -38,7 +38,15 @@ import
 # Private helpers
 # ------------------------------------------------------------------------------
 
-proc postExecutionCreate(c: Computation, child: Computation, newAccountCharged: bool) =
+template countFailedPrecheck(c: Computation) =
+  ## Count a creation stopped by its depth, balance or nonce check as a failed
+  ## nested call. Since Amsterdam (EIP-8037) the creating frame runs these
+  ## checks before the creation starts, so they do not count.
+  if c.fork < FkAmsterdam:
+    inc c.vmState.failedCalls
+
+proc postExecutionCreate(c: Computation, child: Computation, newAccountCharged: bool,
+                         precheckFailed = false) =
   if child.shouldBurnGas:
     c.gasMeter.appendExecutionGasUsed(child.gasMeter.executionGasUsed + child.gasMeter.executionGasLeft)
   else:
@@ -54,7 +62,10 @@ proc postExecutionCreate(c: Computation, child: Computation, newAccountCharged: 
     c.merge(child)
     c.stack.lsTop child.msg.currentTarget
   else:
-    inc c.vmState.failedCalls
+    if precheckFailed:
+      c.countFailedPrecheck()
+    else:
+      inc c.vmState.failedCalls
     if c.fork >= FkAmsterdam:
       c.gasMeter.returnStateGas(child.gasMeter.stateGasLeft)
       if newAccountCharged:
@@ -74,7 +85,7 @@ proc execSubCreate(c: Computation; childMsg: Message;
     newAccountCharged = false
 
   if not child.incrementNonce():
-    postExecutionCreate(c, child, newAccountCharged)
+    postExecutionCreate(c, child, newAccountCharged, precheckFailed = true)
     child.dispose()
     return ok()
 
@@ -167,7 +178,7 @@ proc createOp(cpt: VmCpt): EvmResultVoid =
       reason = "Stack too deep",
       maxDepth = MaxCallDepth,
       depth = cpt.msg.depth
-    inc cpt.vmState.failedCalls
+    cpt.countFailedPrecheck()
     return ok()
 
   if endowment.isZero.not:
@@ -177,7 +188,7 @@ proc createOp(cpt: VmCpt): EvmResultVoid =
         reason = "Insufficient funds available to transfer",
         required = endowment,
         balance = senderBalance
-      inc cpt.vmState.failedCalls
+      cpt.countFailedPrecheck()
       return ok()
 
   var
@@ -248,7 +259,7 @@ proc create2Op(cpt: VmCpt): EvmResultVoid =
       reason = "Stack too deep",
       maxDepth = MaxCallDepth,
       depth = cpt.msg.depth
-    inc cpt.vmState.failedCalls
+    cpt.countFailedPrecheck()
     return ok()
 
   if endowment.isZero.not:
@@ -258,7 +269,7 @@ proc create2Op(cpt: VmCpt): EvmResultVoid =
         reason = "Insufficient funds available to transfer",
         required = endowment,
         balance = senderBalance
-      inc cpt.vmState.failedCalls
+      cpt.countFailedPrecheck()
       return ok()
 
   var

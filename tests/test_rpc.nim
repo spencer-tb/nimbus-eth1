@@ -517,6 +517,20 @@ proc generateBlock(env: var TestEnv) =
   env.contractTxHash = tx3.computeRlpHash
   env.blockHash = blk.header.computeBlockHash
 
+proc runAsInBlock(env: TestEnv, args: TransactionArgs): tuple[ok: bool, failedCalls: int] =
+  ## Run `args` on the latest block with the gas split of a block transaction
+  ## and return whether it succeeded and how many of its nested calls and
+  ## creations failed.
+  let
+    header = env.chain.latestHeader
+    txFrame = env.chain.txFrame(header).txFrameBegin()
+    vmState = BaseVMState.new(
+      Header(number: header.number - 1), header, env.com, txFrame)
+    res = rpcCallEvm(args, header, vmState)
+  result = (res.isOk and not res.get.isError, vmState.failedCalls)
+  vmState.dispose()
+  txFrame.dispose()
+
 func contractsInConfig(c: ConfigObject, contracts: openArray[addresses.Address]): bool =
   for z in contracts:
     var found = false
@@ -1148,21 +1162,12 @@ proc rpcMain*() =
     test "nested calls that fail their balance precheck count as failed":
       # Gas estimation compares the failed nested calls of its executions,
       # so a CALL or CREATE stopped by its balance precheck counts as one.
-      let
-        header = env.chain.latestHeader
-        txFrame = env.chain.txFrame(header).txFrameBegin()
-        vmState = BaseVMState.new(
-          Header(number: header.number - 1), header, env.com, txFrame)
-        args = TransactionArgs(
-          `from`: Opt.some(signer),
-          to: Opt.some(precheckFailerAddress),
-          gas: Opt.some(w3Qty(100_000'u64)))
-        res = rpcCallEvm(args, header, vmState)
-      check res.isOk
-      check not res.get.isError
-      check vmState.failedCalls == 2
-      vmState.dispose()
-      txFrame.dispose()
+      let run = env.runAsInBlock(TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(precheckFailerAddress),
+        gas: Opt.some(w3Qty(100_000'u64))))
+      check run.ok
+      check run.failedCalls == 2
 
     test "eth_estimateGas with gas above the RPC gas cap and the block gas limit stays capped":
       # The block gas limit is below the 50M RPC gas cap, so the search stops
@@ -1619,6 +1624,17 @@ proc rpcMain*() =
       let gas = await client.eth_estimateGas(ec)
       check gas < w3Qty(TX_MAX_GAS_LIMIT.uint64)
 
+    test "only the CALL stopped by its balance precheck counts as failed":
+      # Since Amsterdam (EIP-8037) the creating frame runs the checks of a
+      # CREATE before the creation starts, so a failed check is not a failed
+      # nested creation. A failed CALL check still counts.
+      let run = env.runAsInBlock(TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(precheckFailerAddress),
+        gas: Opt.some(w3Qty(100_000'u64))))
+      check run.ok
+      check run.failedCalls == 1
+
     test "eth_estimateGas rejects a calldata floor above TX_MAX_GAS_LIMIT":
       # 256 KiB of calldata cost a floor above TX_MAX_GAS_LIMIT, which makes
       # the transaction invalid in a block at any gas limit.
@@ -1713,17 +1729,9 @@ proc rpcMain*() =
       # Run the deployment at the estimate as in a block.
       var atEstimate = ec
       atEstimate.gas = Opt.some(gas)
-      let
-        header = env.chain.latestHeader
-        txFrame = env.chain.txFrame(header).txFrameBegin()
-        vmState = BaseVMState.new(
-          Header(number: header.number - 1), header, env.com, txFrame)
-        res = rpcCallEvm(atEstimate, header, vmState)
-      check res.isOk
-      check not res.get.isError
-      check vmState.failedCalls == 0
-      vmState.dispose()
-      txFrame.dispose()
+      let run = env.runAsInBlock(atEstimate)
+      check run.ok
+      check run.failedCalls == 0
 
     env.close()
 
