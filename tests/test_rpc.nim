@@ -1600,6 +1600,16 @@ proc rpcMain*() =
       let gas = await client.eth_estimateGas(ec)
       check gas < w3Qty(TX_MAX_GAS_LIMIT.uint64)
 
+    test "eth_estimateGas rejects a calldata floor above TX_MAX_GAS_LIMIT":
+      # 256 KiB of calldata cost a floor above TX_MAX_GAS_LIMIT, which makes
+      # the transaction invalid in a block at any gas limit.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(contractAddress),
+        input: Opt.some(newSeq[byte](262_144)))
+      expect RpcResponseError:
+        discard await client.eth_estimateGas(ec)
+
     test "eth_call spends all of its gas on execution":
       # EIP-8037 caps the execution gas of a transaction at TX_MAX_GAS_LIMIT,
       # eth_call is not capped.

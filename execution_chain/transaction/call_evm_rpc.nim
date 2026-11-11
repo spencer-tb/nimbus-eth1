@@ -148,6 +148,12 @@ proc rpcEstimateGas*(
   let
     minGasLimit = max(intrinsic.execution, intrinsic.floorDataGas)
 
+  # After Amsterdam (EIP-8037), a transaction whose intrinsic gas or calldata
+  # floor exceeds TX_MAX_GAS_LIMIT is invalid in a block at any gas limit.
+  if fork >= FkAmsterdam and minGasLimit > TX_MAX_GAS_LIMIT.GasInt:
+    return err(OutputResult(
+      error: "intrinsic gas exceeds TX_MAX_GAS_LIMIT: " & $minGasLimit))
+
   # Create a helper to check if a gas allowance results in an executable
   # transaction: the transaction succeeds and no more than `maxFailedCalls` of
   # its nested calls and creations fail (a negative value skips that check).
