@@ -87,6 +87,76 @@ const
     Push1 "0x1C"
     Revert
   revertAddress = address"0x000000000000000000000000000000000000beef"
+  # Loops 3000 times, about 78,000 gas.
+  burnerCode = evmByteCode:
+    Push2 "0x0BB8"
+    JumpDest
+    Push1 "0x01"
+    Swap1
+    Sub
+    Dup1
+    Push1 "0x03"
+    JumpI
+    Stop
+  burnerAddress = address"0x000000000000000000000000000000000000b001"
+  # Calls the burner with all gas left and returns whether it succeeded.
+  catcherCode = evmByteCode:
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push20 "0x000000000000000000000000000000000000b001"
+    Gas
+    Call
+    Push1 "0x00"
+    Mstore
+    Push1 "0x20"
+    Push1 "0x00"
+    Return
+  catcherAddress = address"0x000000000000000000000000000000000000ca01"
+  # Calls the burner with 1,000 gas, which always runs out, and returns
+  # whether it succeeded.
+  proberCode = evmByteCode:
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push20 "0x000000000000000000000000000000000000b001"
+    Push2 "0x03E8"
+    Call
+    Push1 "0x00"
+    Mstore
+    Push1 "0x20"
+    Push1 "0x00"
+    Return
+  proberAddress = address"0x000000000000000000000000000000000000ca02"
+  # Sets a fresh storage slot.
+  storerCode = evmByteCode:
+    Push1 "0x01"
+    Push1 "0x00"
+    Sstore
+    Stop
+  storerAddress = address"0x000000000000000000000000000000000000b002"
+  # Calls the storer with 30,000 gas, too little for the state gas of the new
+  # slot (EIP-8037) unless a state gas reservoir pays it, and returns whether
+  # it succeeded.
+  reservoirCatcherCode = evmByteCode:
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push20 "0x000000000000000000000000000000000000b002"
+    Push2 "0x7530"
+    Call
+    Push1 "0x00"
+    Mstore
+    Push1 "0x20"
+    Push1 "0x00"
+    Return
+  reservoirCatcherAddress = address"0x000000000000000000000000000000000000ca03"
   keyStore = "tests/keystore"
   signer = address"0x0e69cde81b1aa07a45c32c6cd85d67229d36bb1b"
   contractAddress = address"0xa3b2222afa5c987da6ef773fde8d01b9f23d481f"
@@ -229,6 +299,12 @@ proc setupEnv(envFork: HardFork = MergeFork): TestEnv =
   params.genesis.alloc[blockNumberAddress] = GenesisAccount(code: blockNumberCode)
   params.genesis.alloc[baseFeeAddress] = GenesisAccount(code: baseFeeCode)
   params.genesis.alloc[revertAddress] = GenesisAccount(code: revertCode)
+  params.genesis.alloc[burnerAddress] = GenesisAccount(code: burnerCode)
+  params.genesis.alloc[catcherAddress] = GenesisAccount(code: catcherCode)
+  params.genesis.alloc[proberAddress] = GenesisAccount(code: proberCode)
+  params.genesis.alloc[storerAddress] = GenesisAccount(code: storerCode)
+  params.genesis.alloc[reservoirCatcherAddress] =
+    GenesisAccount(code: reservoirCatcherCode)
   params.genesis.alloc[signer] = GenesisAccount(balance: oneETH)
   params.genesis.alloc[create2Deployer] =
     GenesisAccount(code: create2DeployerCode, nonce: 1)
@@ -963,6 +1039,25 @@ proc rpcMain*() =
       check res > w3Qty(20999'u64)
       check res < w3Qty(1_000_000'u64)
 
+    test "eth_estimateGas leaves a caught nested call enough gas":
+      # The catcher succeeds even when the burner runs out of gas, so the
+      # estimate must not settle on a gas limit that starves the burner.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(catcherAddress))
+      let gas = await client.eth_estimateGas(ec)
+      var atEstimate = ec
+      atEstimate.gas = Opt.some(gas)
+      let res = await client.eth_call(atEstimate, "latest")
+      check UInt256.fromBytesBE(res) == 1.u256
+
+    test "eth_estimateGas is not inflated by a nested call that always fails":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(proberAddress))
+      let gas = await client.eth_estimateGas(ec)
+      check gas <= w3Qty(100_000'u64)
+
     test "eth_getBlockByHash":
       let res = await client.eth_getBlockByHash(env.blockHash, true)
       check res.isNil.not
@@ -1397,6 +1492,16 @@ proc rpcMain*() =
       check res.current.activationTime.uint64 == 0'u64
 
       check res.current.contractsInConfig(amsterdamSystemContracts)
+
+    test "eth_estimateGas stays below TX_MAX_GAS_LIMIT for a nested call fed by the reservoir":
+      # Given more than TX_MAX_GAS_LIMIT, the nested call completes because
+      # the state gas reservoir pays for the new slot. The estimate must not
+      # go past TX_MAX_GAS_LIMIT only to fund that reservoir.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(reservoirCatcherAddress))
+      let gas = await client.eth_estimateGas(ec)
+      check gas < w3Qty(TX_MAX_GAS_LIMIT.uint64)
 
     env.close()
 

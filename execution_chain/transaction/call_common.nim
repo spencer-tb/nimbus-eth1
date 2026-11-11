@@ -96,6 +96,7 @@ proc setupEVM(params: CallParams, keepStack: bool): Computation =
   # reset global refundCounter counter each time
   # EVM called for a new transaction
   vmState.refundCounter = 0
+  vmState.failedCalls = 0
 
   let
     # Prevent underflow which can occur when gasLimit is less than intrinsicGas.

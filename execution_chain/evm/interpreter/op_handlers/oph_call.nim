@@ -245,6 +245,7 @@ proc execSubCall(c: Computation; childMsg: Message; code: CodeBytesRef;
       c.merge(child)
       c.stack.lsTop(1)
     else:
+      inc c.vmState.failedCalls
       if c.fork >= FkAmsterdam:
         c.gasMeter.returnStateGas(child.gasMeter.stateGasLeft)
         if newAccountCharged:

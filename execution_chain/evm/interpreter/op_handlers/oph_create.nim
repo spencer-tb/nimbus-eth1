@@ -54,6 +54,7 @@ proc postExecutionCreate(c: Computation, child: Computation, newAccountCharged: 
     c.merge(child)
     c.stack.lsTop child.msg.currentTarget
   else:
+    inc c.vmState.failedCalls
     if c.fork >= FkAmsterdam:
       c.gasMeter.returnStateGas(child.gasMeter.stateGasLeft)
       if newAccountCharged:

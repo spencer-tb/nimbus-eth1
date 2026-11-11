@@ -135,8 +135,13 @@ proc rpcEstimateGas*(
   let
     minGasLimit = max(intrinsic.execution, intrinsic.floorDataGas)
 
-  # Create a helper to check if a gas allowance results in an executable transaction
-  proc executable(gasLimit: GasInt): Result[CallResult, OutputResult] =
+  # Create a helper to check if a gas allowance results in an executable
+  # transaction: the transaction succeeds and no more than `maxFailedCalls` of
+  # its nested calls and creations fail (a negative value skips that check).
+  # After each execution `vmState.failedCalls` holds its count of failures.
+  proc executable(
+      gasLimit: GasInt, maxFailedCalls = -1
+  ): Result[CallResult, OutputResult] =
     if minGasLimit > gasLimit:
       # Special case, raise gas limit
       return err(OutputResult(error: "min gas limit exceeds gas limit: " &
@@ -153,6 +158,8 @@ proc rpcEstimateGas*(
     vmState.ledger.rollback(savePoint)
     if res.error.len > 0:
       err(OutputResult(error: res.error, output: res.output))
+    elif maxFailedCalls >= 0 and vmState.failedCalls > maxFailedCalls:
+      err(OutputResult(error: "nested call fails at gas limit " & $gasLimit))
     else:
       ok(res)
 
@@ -166,6 +173,20 @@ proc rpcEstimateGas*(
   let highResult = executable(hi).valueOr:
     return err(error)
 
+  # A gas limit only counts as sufficient if no more nested calls fail than in
+  # a reference execution. Otherwise the search can settle on a limit where an
+  # inner call runs out of gas, the caller catches the failure and the
+  # transaction succeeds while doing something else than intended.
+  #
+  # After Amsterdam, gas above TX_MAX_GAS_LIMIT only feeds the state gas
+  # reservoir. A call that completes an inner call only with a reservoir would
+  # otherwise be sized past TX_MAX_GAS_LIMIT, so the execution at
+  # TX_MAX_GAS_LIMIT is the reference when it succeeds.
+  var allowedFailures = vmState.failedCalls
+  if fork >= FkAmsterdam and hi > TX_MAX_GAS_LIMIT.GasInt and
+      executable(TX_MAX_GAS_LIMIT.GasInt).isOk:
+    allowedFailures = max(allowedFailures, vmState.failedCalls)
+
   if highResult.gasUsed > 0:
     lo = max(lo, highResult.gasUsed - 1)
 
@@ -173,7 +194,7 @@ proc rpcEstimateGas*(
   let callStipend = GasInt gasFees[fork][GasCallStipend]
   let optimisticGasLimit = (highResult.gasUsed + callStipend) * 64 div 63
   if optimisticGasLimit < hi:
-    if executable(optimisticGasLimit).isErr:
+    if executable(optimisticGasLimit, allowedFailures).isErr:
       lo = optimisticGasLimit
     else:
       hi = optimisticGasLimit
@@ -181,7 +202,7 @@ proc rpcEstimateGas*(
   # Execute the binary search and hone in on an executable gas limit
   while lo + 1 < hi:
     let mid = (hi + lo) div 2
-    if executable(mid).isErr:
+    if executable(mid, allowedFailures).isErr:
       lo = mid
     else:
       hi = mid
