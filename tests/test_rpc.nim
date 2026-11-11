@@ -225,6 +225,28 @@ const
     Push0
     Return
   gasLeftAddress = address"0x000000000000000000000000000000000000c0e1"
+  # Init code that creates 114 contracts of 24,576 zero bytes each and
+  # ignores the results. After Amsterdam (EIP-8037) their code deposits need
+  # more state gas than TX_MAX_TOTAL_GAS_LIMIT. The child init code is
+  # PUSH2 0x6000 PUSH1 0 RETURN.
+  manyMaxSizeCreationsCode = evmByteCode:
+    Push6 "0x6160006000F3"
+    Push1 "0x00"
+    Mstore
+    Push1 "0x72"
+    JumpDest
+    Push1 "0x06"
+    Push1 "0x1A"
+    Push1 "0x00"
+    Create
+    Pop
+    Push1 "0x01"
+    Swap1
+    Sub
+    Dup1
+    Push1 "0x0C"
+    JumpI
+    Stop
   # Init code that creates two contracts of 24,576 zero bytes each and
   # ignores the results. After Amsterdam (EIP-8037) each code deposit needs
   # more state gas than TX_MAX_GAS_LIMIT. The child init code is
@@ -1760,6 +1782,31 @@ proc rpcMain*() =
       let run = env.runAsInBlock(atEstimate)
       check run.ok
       check run.failedCalls == 0
+
+    env.close()
+
+  suite "Remote Procedure Calls - Amsterdam with a block gas limit above TX_MAX_TOTAL_GAS_LIMIT":
+    var env = setupEnv(Amsterdam, genesisGasLimit = 5_000_000_000'u64.GasInt)
+    let client = env.client
+
+    test "eth_estimateGas with gas above TX_MAX_TOTAL_GAS_LIMIT searches up to TX_MAX_TOTAL_GAS_LIMIT":
+      # A small call still gets an estimate: the request gas is lowered.
+      let small = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(contractAddress),
+        gas: Opt.some(w3Qty(5_000_000_000'u64)))
+      let smallGas = await client.eth_estimateGas(small)
+      check smallGas < w3Qty(100_000'u64)
+
+      # The deployment needs more than TX_MAX_TOTAL_GAS_LIMIT for all of its
+      # creations to succeed. The estimate stays at most
+      # TX_MAX_TOTAL_GAS_LIMIT, where its last creation fails.
+      let deploy = TransactionArgs(
+        `from`: Opt.some(signer),
+        input: Opt.some(manyMaxSizeCreationsCode),
+        gas: Opt.some(w3Qty(5_000_000_000'u64)))
+      let gas = await client.eth_estimateGas(deploy)
+      check gas <= w3Qty(TX_MAX_TOTAL_GAS_LIMIT.uint64)
 
     env.close()
 
