@@ -56,6 +56,7 @@ proc init(
   self.blobGasUsed = 0'u64
   self.blockLogs.setLen(0)
   self.refundCounter = 0
+  self.failedCalls = 0
   self.balTracker = tracker
 
 func blockCtx(header: Header): BlockContext =

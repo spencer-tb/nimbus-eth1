@@ -22,7 +22,8 @@ export
 proc callParams*(tx: Transaction,
                  sender: Address,
                  vmState: BaseVMState,
-                 intrinsic: IntrinsicGas): CallParams =
+                 intrinsic: IntrinsicGas,
+                 noExecutionGasCap = false): CallParams =
   let
     baseFee = vmState.blockCtx.baseFeePerGas
   CallParams(
@@ -31,7 +32,8 @@ proc callParams*(tx: Transaction,
     sender           : sender,
     isCreate         : tx.contractCreation,
     tx               : tx.addr,
-    intrinsic        : intrinsic
+    intrinsic        : intrinsic,
+    noExecutionGasCap: noExecutionGasCap
   )
 
 proc txCallEvm*(tx: Transaction,

@@ -16,6 +16,8 @@ import
   eth/common/[transaction_utils, addresses],
   ../execution_api/engine_client,
   ../execution_chain/[constants, transaction, conf, version_info],
+  ../execution_chain/evm/state,
+  ../execution_chain/transaction/call_evm_rpc,
   ../execution_chain/db/core_db/memory_only,
   ../execution_chain/db/[ledger, storage_types],
   ../execution_chain/sync/wire_protocol,
@@ -87,6 +89,183 @@ const
     Push1 "0x1C"
     Revert
   revertAddress = address"0x000000000000000000000000000000000000beef"
+  # Loops 3000 times, about 78,000 gas.
+  burnerCode = evmByteCode:
+    Push2 "0x0BB8"
+    JumpDest
+    Push1 "0x01"
+    Swap1
+    Sub
+    Dup1
+    Push1 "0x03"
+    JumpI
+    Stop
+  burnerAddress = address"0x000000000000000000000000000000000000b001"
+  # Calls the burner with all gas left and returns whether it succeeded.
+  catcherCode = evmByteCode:
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push20 "0x000000000000000000000000000000000000b001"
+    Gas
+    Call
+    Push1 "0x00"
+    Mstore
+    Push1 "0x20"
+    Push1 "0x00"
+    Return
+  catcherAddress = address"0x000000000000000000000000000000000000ca01"
+  # Calls the burner with 1,000 gas, which always runs out, and returns
+  # whether it succeeded.
+  proberCode = evmByteCode:
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push20 "0x000000000000000000000000000000000000b001"
+    Push2 "0x03E8"
+    Call
+    Push1 "0x00"
+    Mstore
+    Push1 "0x20"
+    Push1 "0x00"
+    Return
+  proberAddress = address"0x000000000000000000000000000000000000ca02"
+  # Sets a fresh storage slot.
+  storerCode = evmByteCode:
+    Push1 "0x01"
+    Push1 "0x00"
+    Sstore
+    Stop
+  storerAddress = address"0x000000000000000000000000000000000000b002"
+  # Calls the storer with 30,000 gas, too little for the state gas of the new
+  # slot (EIP-8037) unless a state gas reservoir pays it, and returns whether
+  # it succeeded.
+  reservoirCatcherCode = evmByteCode:
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push20 "0x000000000000000000000000000000000000b002"
+    Push2 "0x7530"
+    Call
+    Push1 "0x00"
+    Mstore
+    Push1 "0x20"
+    Push1 "0x00"
+    Return
+  reservoirCatcherAddress = address"0x000000000000000000000000000000000000ca03"
+  # Returns the gas left at entry if it is at least 52M, above the 50M RPC
+  # gas cap, and reverts otherwise.
+  aboveRpcGasCapCode = evmByteCode:
+    Gas
+    Push4 "0x03197500"
+    Dup2
+    Lt
+    Push1 "0x11"
+    JumpI
+    Push0
+    Mstore
+    Push1 "0x20"
+    Push0
+    Return
+    JumpDest
+    Push0
+    Push0
+    Revert
+  aboveRpcGasCapAddress = address"0x000000000000000000000000000000000000c0de"
+  # Returns the gas left at entry if it is at least 20M, above
+  # TX_MAX_GAS_LIMIT (2^24), and reverts otherwise.
+  aboveTxGasCapCode = evmByteCode:
+    Gas
+    Push4 "0x01312D00"
+    Dup2
+    Lt
+    Push1 "0x11"
+    JumpI
+    Push0
+    Mstore
+    Push1 "0x20"
+    Push0
+    Return
+    JumpDest
+    Push0
+    Push0
+    Revert
+  aboveTxGasCapAddress = address"0x000000000000000000000000000000000000c0df"
+  # Has no balance, so its CALL and CREATE with 1 wei fail the balance
+  # precheck before a child frame starts.
+  precheckFailerCode = evmByteCode:
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x01"
+    Push20 "0x000000000000000000000000000000000000b001"
+    Gas
+    Call
+    Pop
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x01"
+    Create
+    Pop
+    Stop
+  precheckFailerAddress = address"0x000000000000000000000000000000000000ca04"
+  # Returns the gas left at entry.
+  gasLeftCode = evmByteCode:
+    Gas
+    Push0
+    Mstore
+    Push1 "0x20"
+    Push0
+    Return
+  gasLeftAddress = address"0x000000000000000000000000000000000000c0e1"
+  # Init code that creates 114 contracts of 24,576 zero bytes each and
+  # ignores the results. After Amsterdam (EIP-8037) their code deposits need
+  # more state gas than TX_MAX_TOTAL_GAS_LIMIT. The child init code is
+  # PUSH2 0x6000 PUSH1 0 RETURN.
+  manyMaxSizeCreationsCode = evmByteCode:
+    Push6 "0x6160006000F3"
+    Push1 "0x00"
+    Mstore
+    Push1 "0x72"
+    JumpDest
+    Push1 "0x06"
+    Push1 "0x1A"
+    Push1 "0x00"
+    Create
+    Pop
+    Push1 "0x01"
+    Swap1
+    Sub
+    Dup1
+    Push1 "0x0C"
+    JumpI
+    Stop
+  # Init code that creates two contracts of 24,576 zero bytes each and
+  # ignores the results. After Amsterdam (EIP-8037) each code deposit needs
+  # more state gas than TX_MAX_GAS_LIMIT. The child init code is
+  # PUSH2 0x6000 PUSH1 0 RETURN.
+  twoMaxSizeCreationsCode = evmByteCode:
+    Push6 "0x6160006000F3"
+    Push1 "0x00"
+    Mstore
+    Push1 "0x06"
+    Push1 "0x1A"
+    Push1 "0x00"
+    Create
+    Pop
+    Push1 "0x06"
+    Push1 "0x1A"
+    Push1 "0x00"
+    Create
+    Pop
+    Stop
   keyStore = "tests/keystore"
   signer = address"0x0e69cde81b1aa07a45c32c6cd85d67229d36bb1b"
   contractAddress = address"0xa3b2222afa5c987da6ef773fde8d01b9f23d481f"
@@ -218,17 +397,33 @@ proc makeBlobTx(env: var TestEnv, nonce: int): PooledTransaction =
       commitments: @[pooled_txs.KzgCommitment(commitment.bytes)],
       proofs: @[pooled_txs.KzgProof(proof.bytes)]))
 
-proc setupEnv(envFork: HardFork = MergeFork): TestEnv =
+proc setupEnv(envFork: HardFork = MergeFork, genesisGasLimit = 0.GasInt): TestEnv =
   doAssert(envFork >= MergeFork)
 
   let
     conf  = setupConfig()
     params = conf.computeNetworkParams()
 
+  if genesisGasLimit != 0:
+    params.genesis.gasLimit = genesisGasLimit
+
   params.genesis.alloc[contractAddress] = GenesisAccount(code: contractCode)
   params.genesis.alloc[blockNumberAddress] = GenesisAccount(code: blockNumberCode)
   params.genesis.alloc[baseFeeAddress] = GenesisAccount(code: baseFeeCode)
   params.genesis.alloc[revertAddress] = GenesisAccount(code: revertCode)
+  params.genesis.alloc[burnerAddress] = GenesisAccount(code: burnerCode)
+  params.genesis.alloc[catcherAddress] = GenesisAccount(code: catcherCode)
+  params.genesis.alloc[proberAddress] = GenesisAccount(code: proberCode)
+  params.genesis.alloc[storerAddress] = GenesisAccount(code: storerCode)
+  params.genesis.alloc[reservoirCatcherAddress] =
+    GenesisAccount(code: reservoirCatcherCode)
+  params.genesis.alloc[aboveRpcGasCapAddress] =
+    GenesisAccount(code: aboveRpcGasCapCode)
+  params.genesis.alloc[aboveTxGasCapAddress] =
+    GenesisAccount(code: aboveTxGasCapCode)
+  params.genesis.alloc[precheckFailerAddress] =
+    GenesisAccount(code: precheckFailerCode)
+  params.genesis.alloc[gasLeftAddress] = GenesisAccount(code: gasLeftCode)
   params.genesis.alloc[signer] = GenesisAccount(balance: oneETH)
   params.genesis.alloc[create2Deployer] =
     GenesisAccount(code: create2DeployerCode, nonce: 1)
@@ -353,6 +548,20 @@ proc generateBlock(env: var TestEnv) =
   env.txHash = tx1.computeRlpHash
   env.contractTxHash = tx3.computeRlpHash
   env.blockHash = blk.header.computeBlockHash
+
+proc runAsInBlock(env: TestEnv, args: TransactionArgs): tuple[ok: bool, failedCalls: int] =
+  ## Run `args` on the latest block with the gas split of a block transaction
+  ## and return whether it succeeded and how many of its nested calls and
+  ## creations failed.
+  let
+    header = env.chain.latestHeader
+    txFrame = env.chain.txFrame(header).txFrameBegin()
+    vmState = BaseVMState.new(
+      Header(number: header.number - 1), header, env.com, txFrame)
+    res = rpcCallEvm(args, header, vmState)
+  result = (res.isOk and not res.get.isError, vmState.failedCalls)
+  vmState.dispose()
+  txFrame.dispose()
 
 func contractsInConfig(c: ConfigObject, contracts: openArray[addresses.Address]): bool =
   for z in contracts:
@@ -963,6 +1172,45 @@ proc rpcMain*() =
       check res > w3Qty(20999'u64)
       check res < w3Qty(1_000_000'u64)
 
+    test "eth_estimateGas leaves a caught nested call enough gas":
+      # The catcher succeeds even when the burner runs out of gas, so the
+      # estimate must not settle on a gas limit that starves the burner.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(catcherAddress))
+      let gas = await client.eth_estimateGas(ec)
+      var atEstimate = ec
+      atEstimate.gas = Opt.some(gas)
+      let res = await client.eth_call(atEstimate, "latest")
+      check UInt256.fromBytesBE(res) == 1.u256
+
+    test "eth_estimateGas is not inflated by a nested call that always fails":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(proberAddress))
+      let gas = await client.eth_estimateGas(ec)
+      check gas <= w3Qty(100_000'u64)
+
+    test "nested calls that fail their balance precheck count as failed":
+      # Gas estimation compares the failed nested calls of its executions,
+      # so a CALL or CREATE stopped by its balance precheck counts as one.
+      let run = env.runAsInBlock(TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(precheckFailerAddress),
+        gas: Opt.some(w3Qty(100_000'u64))))
+      check run.ok
+      check run.failedCalls == 2
+
+    test "eth_estimateGas with gas above the RPC gas cap and the block gas limit stays capped":
+      # The block gas limit is below the 50M RPC gas cap, so the search stops
+      # at the cap, below what the contract needs.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveRpcGasCapAddress),
+        gas: Opt.some(w3Qty(100_000_000'u64)))
+      expect RpcResponseError:
+        discard await client.eth_estimateGas(ec)
+
     test "eth_getBlockByHash":
       let res = await client.eth_getBlockByHash(env.blockHash, true)
       check res.isNil.not
@@ -1397,6 +1645,168 @@ proc rpcMain*() =
       check res.current.activationTime.uint64 == 0'u64
 
       check res.current.contractsInConfig(amsterdamSystemContracts)
+
+    test "eth_estimateGas stays below TX_MAX_GAS_LIMIT for a nested call fed by the reservoir":
+      # Given more than TX_MAX_GAS_LIMIT, the nested call completes because
+      # the state gas reservoir pays for the new slot. The estimate must not
+      # go past TX_MAX_GAS_LIMIT only to fund that reservoir.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(reservoirCatcherAddress))
+      let gas = await client.eth_estimateGas(ec)
+      check gas < w3Qty(TX_MAX_GAS_LIMIT.uint64)
+
+    test "only the CALL stopped by its balance precheck counts as failed":
+      # Since Amsterdam (EIP-8037) the creating frame runs the checks of a
+      # CREATE before the creation starts, so a failed check is not a failed
+      # nested creation. A failed CALL check still counts.
+      let run = env.runAsInBlock(TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(precheckFailerAddress),
+        gas: Opt.some(w3Qty(100_000'u64))))
+      check run.ok
+      check run.failedCalls == 1
+
+    test "eth_estimateGas rejects a calldata floor above TX_MAX_GAS_LIMIT":
+      # 256 KiB of calldata cost a floor above TX_MAX_GAS_LIMIT, which makes
+      # the transaction invalid in a block at any gas limit.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(contractAddress),
+        input: Opt.some(newSeq[byte](262_144)))
+      expect RpcResponseError:
+        discard await client.eth_estimateGas(ec)
+
+    test "eth_call spends all of its gas on execution":
+      # EIP-8037 caps the execution gas of a transaction at TX_MAX_GAS_LIMIT,
+      # eth_call is not capped.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveTxGasCapAddress),
+        gas: Opt.some(w3Qty(25_000_000'u64)))
+      let res = await client.eth_call(ec, "latest")
+      check UInt256.fromBytesBE(res) > TX_MAX_GAS_LIMIT.u256
+
+    test "eth_estimateGas keeps the EIP-8037 execution gas cap":
+      # As in a block, the execution gas stays below TX_MAX_GAS_LIMIT, so
+      # the contract reverts at every gas limit.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveTxGasCapAddress))
+      expect RpcResponseError:
+        discard await client.eth_estimateGas(ec)
+
+    env.close()
+
+  suite "Remote Procedure Calls - Osaka":
+    var env = setupEnv(Osaka)
+    let client = env.client
+
+    test "eth_estimateGas is capped at the EIP-7825 transaction gas limit":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveTxGasCapAddress))
+      expect RpcResponseError:
+        discard await client.eth_estimateGas(ec)
+
+    env.close()
+
+  suite "Remote Procedure Calls - RPC gas cap below the block gas limit":
+    const blockGasLimit = 60_000_000'u64
+    var env = setupEnv(Prague, genesisGasLimit = blockGasLimit.GasInt)
+    let client = env.client
+    doAssert DEFAULT_RPC_GAS_CAP.uint64 < 52_000_000'u64
+
+    test "eth_call with gas above the RPC gas cap":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveRpcGasCapAddress),
+        gas: Opt.some(w3Qty(55_000_000'u64)))
+      let res = await client.eth_call(ec, "latest")
+      check UInt256.fromBytesBE(res) >= 52_000_000.u256
+
+    test "eth_call without gas defaults to the RPC gas cap":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(gasLeftAddress))
+      let res = await client.eth_call(ec, "latest")
+      check UInt256.fromBytesBE(res) < DEFAULT_RPC_GAS_CAP.u256
+
+    test "eth_call with gas above the block gas limit is capped at the block gas limit":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(gasLeftAddress),
+        gas: Opt.some(w3Qty(100_000_000'u64)))
+      let
+        res = await client.eth_call(ec, "latest")
+        left = UInt256.fromBytesBE(res)
+      check left > DEFAULT_RPC_GAS_CAP.u256
+      check left < blockGasLimit.u256
+
+    test "eth_estimateGas search reaches the block gas limit":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveRpcGasCapAddress))
+      let gas = await client.eth_estimateGas(ec)
+      check gas >= w3Qty(52_000_000'u64)
+      check gas <= w3Qty(blockGasLimit)
+
+    test "eth_estimateGas with gas above the block gas limit searches up to the block gas limit":
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveRpcGasCapAddress),
+        gas: Opt.some(w3Qty(100_000_000'u64)))
+      let gas = await client.eth_estimateGas(ec)
+      check gas >= w3Qty(52_000_000'u64)
+      check gas <= w3Qty(blockGasLimit)
+
+    env.close()
+
+  suite "Remote Procedure Calls - Amsterdam with a 100M block gas limit":
+    var env = setupEnv(Amsterdam, genesisGasLimit = 100_000_000.GasInt)
+    let client = env.client
+
+    test "eth_estimateGas above TX_MAX_GAS_LIMIT lets every creation of a deployment succeed":
+      # Both creations fail at TX_MAX_GAS_LIMIT, where no reservoir pays their
+      # code deposits. That must not let an estimate above TX_MAX_GAS_LIMIT
+      # starve the second creation.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        input: Opt.some(twoMaxSizeCreationsCode))
+      let gas = await client.eth_estimateGas(ec)
+      check gas > w3Qty(TX_MAX_GAS_LIMIT.uint64)
+
+      # Run the deployment at the estimate as in a block.
+      var atEstimate = ec
+      atEstimate.gas = Opt.some(gas)
+      let run = env.runAsInBlock(atEstimate)
+      check run.ok
+      check run.failedCalls == 0
+
+    env.close()
+
+  suite "Remote Procedure Calls - Amsterdam with a block gas limit above TX_MAX_TOTAL_GAS_LIMIT":
+    var env = setupEnv(Amsterdam, genesisGasLimit = 5_000_000_000'u64.GasInt)
+    let client = env.client
+
+    test "eth_estimateGas with gas above TX_MAX_TOTAL_GAS_LIMIT searches up to TX_MAX_TOTAL_GAS_LIMIT":
+      # A small call still gets an estimate: the request gas is lowered.
+      let small = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(contractAddress),
+        gas: Opt.some(w3Qty(5_000_000_000'u64)))
+      let smallGas = await client.eth_estimateGas(small)
+      check smallGas < w3Qty(100_000'u64)
+
+      # The deployment needs more than TX_MAX_TOTAL_GAS_LIMIT for all of its
+      # creations to succeed. The estimate stays at most
+      # TX_MAX_TOTAL_GAS_LIMIT, where its last creation fails.
+      let deploy = TransactionArgs(
+        `from`: Opt.some(signer),
+        input: Opt.some(manyMaxSizeCreationsCode),
+        gas: Opt.some(w3Qty(5_000_000_000'u64)))
+      let gas = await client.eth_estimateGas(deploy)
+      check gas <= w3Qty(TX_MAX_TOTAL_GAS_LIMIT.uint64)
 
     env.close()
 

@@ -96,6 +96,7 @@ proc setupEVM(params: CallParams, keepStack: bool): Computation =
   # reset global refundCounter counter each time
   # EVM called for a new transaction
   vmState.refundCounter = 0
+  vmState.failedCalls = 0
 
   let
     # Prevent underflow which can occur when gasLimit is less than intrinsicGas.
@@ -113,8 +114,11 @@ proc setupEVM(params: CallParams, keepStack: bool): Computation =
     executionRefund = 0'i64
 
   if fork >= Amsterdam:
-    executionGas = min(executionGasBudget, evmGas)
-    stateGasReservoir = evmGas - executionGas
+    # eth_call spends all of its gas on execution, without the
+    # TX_MAX_GAS_LIMIT cap and without a state gas reservoir.
+    if not params.noExecutionGasCap:
+      executionGas = min(executionGasBudget, evmGas)
+      stateGasReservoir = evmGas - executionGas
   else:
     executionRefund = setDelegation(params)
 

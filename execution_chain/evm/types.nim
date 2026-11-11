@@ -65,6 +65,7 @@ type
     txLogs*           : seq[Log]
     blockLogs*        : seq[Log] # EIP-6110
     refundCounter*    : int64    # Global refundCounter counter
+    failedCalls*      : int      # Nested calls and creations that failed in the current tx
     balTracker*       : BlockAccessListTrackerRef
 
   Computation* = ref object
