@@ -216,6 +216,25 @@ const
     Pop
     Stop
   precheckFailerAddress = address"0x000000000000000000000000000000000000ca04"
+  # Init code that creates two contracts of 24,576 zero bytes each and
+  # ignores the results. After Amsterdam (EIP-8037) each code deposit needs
+  # more state gas than TX_MAX_GAS_LIMIT. The child init code is
+  # PUSH2 0x6000 PUSH1 0 RETURN.
+  twoMaxSizeCreationsCode = evmByteCode:
+    Push6 "0x6160006000F3"
+    Push1 "0x00"
+    Mstore
+    Push1 "0x06"
+    Push1 "0x1A"
+    Push1 "0x00"
+    Create
+    Pop
+    Push1 "0x06"
+    Push1 "0x1A"
+    Push1 "0x00"
+    Create
+    Pop
+    Stop
   keyStore = "tests/keystore"
   signer = address"0x0e69cde81b1aa07a45c32c6cd85d67229d36bb1b"
   contractAddress = address"0xa3b2222afa5c987da6ef773fde8d01b9f23d481f"
@@ -1674,6 +1693,37 @@ proc rpcMain*() =
       let gas = await client.eth_estimateGas(ec)
       check gas >= w3Qty(52_000_000'u64)
       check gas <= w3Qty(blockGasLimit)
+
+    env.close()
+
+  suite "Remote Procedure Calls - Amsterdam with a 100M block gas limit":
+    var env = setupEnv(Amsterdam, genesisGasLimit = 100_000_000.GasInt)
+    let client = env.client
+
+    test "eth_estimateGas above TX_MAX_GAS_LIMIT lets every creation of a deployment succeed":
+      # Both creations fail at TX_MAX_GAS_LIMIT, where no reservoir pays their
+      # code deposits. That must not let an estimate above TX_MAX_GAS_LIMIT
+      # starve the second creation.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        input: Opt.some(twoMaxSizeCreationsCode))
+      let gas = await client.eth_estimateGas(ec)
+      check gas > w3Qty(TX_MAX_GAS_LIMIT.uint64)
+
+      # Run the deployment at the estimate as in a block.
+      var atEstimate = ec
+      atEstimate.gas = Opt.some(gas)
+      let
+        header = env.chain.latestHeader
+        txFrame = env.chain.txFrame(header).txFrameBegin()
+        vmState = BaseVMState.new(
+          Header(number: header.number - 1), header, env.com, txFrame)
+        res = rpcCallEvm(atEstimate, header, vmState)
+      check res.isOk
+      check not res.get.isError
+      check vmState.failedCalls == 0
+      vmState.dispose()
+      txFrame.dispose()
 
     env.close()
 

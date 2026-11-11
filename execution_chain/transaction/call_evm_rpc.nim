@@ -199,12 +199,19 @@ proc rpcEstimateGas*(
   #
   # After Amsterdam, gas above TX_MAX_GAS_LIMIT only feeds the state gas
   # reservoir. A call that completes an inner call only with a reservoir would
-  # otherwise be sized past TX_MAX_GAS_LIMIT, so the execution at
-  # TX_MAX_GAS_LIMIT is the reference when it succeeds.
-  var allowedFailures = vmState.failedCalls
+  # otherwise be sized past TX_MAX_GAS_LIMIT, so for gas limits up to
+  # TX_MAX_GAS_LIMIT the execution at TX_MAX_GAS_LIMIT is also a reference
+  # when it succeeds. Above TX_MAX_GAS_LIMIT the execution at the highest gas
+  # limit stays the only reference, so the reservoir funds what it funds there.
+  let failedAtHi = vmState.failedCalls
+  var failedAtTxCap = failedAtHi
   if fork >= FkAmsterdam and hi > TX_MAX_GAS_LIMIT.GasInt and
       executable(TX_MAX_GAS_LIMIT.GasInt).isOk:
-    allowedFailures = max(allowedFailures, vmState.failedCalls)
+    failedAtTxCap = max(failedAtHi, vmState.failedCalls)
+
+  proc allowedFailures(gasLimit: GasInt): int =
+    if gasLimit <= TX_MAX_GAS_LIMIT.GasInt: failedAtTxCap
+    else: failedAtHi
 
   if highResult.gasUsed > 0:
     lo = max(lo, highResult.gasUsed - 1)
@@ -213,7 +220,7 @@ proc rpcEstimateGas*(
   let callStipend = GasInt gasFees[fork][GasCallStipend]
   let optimisticGasLimit = (highResult.gasUsed + callStipend) * 64 div 63
   if optimisticGasLimit < hi:
-    if executable(optimisticGasLimit, allowedFailures).isErr:
+    if executable(optimisticGasLimit, allowedFailures(optimisticGasLimit)).isErr:
       lo = optimisticGasLimit
     else:
       hi = optimisticGasLimit
@@ -221,7 +228,7 @@ proc rpcEstimateGas*(
   # Execute the binary search and hone in on an executable gas limit
   while lo + 1 < hi:
     let mid = (hi + lo) div 2
-    if executable(mid, allowedFailures).isErr:
+    if executable(mid, allowedFailures(mid)).isErr:
       lo = mid
     else:
       hi = mid
