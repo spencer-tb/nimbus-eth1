@@ -167,6 +167,7 @@ proc createOp(cpt: VmCpt): EvmResultVoid =
       reason = "Stack too deep",
       maxDepth = MaxCallDepth,
       depth = cpt.msg.depth
+    inc cpt.vmState.failedCalls
     return ok()
 
   if endowment.isZero.not:
@@ -176,6 +177,7 @@ proc createOp(cpt: VmCpt): EvmResultVoid =
         reason = "Insufficient funds available to transfer",
         required = endowment,
         balance = senderBalance
+      inc cpt.vmState.failedCalls
       return ok()
 
   var
@@ -246,6 +248,7 @@ proc create2Op(cpt: VmCpt): EvmResultVoid =
       reason = "Stack too deep",
       maxDepth = MaxCallDepth,
       depth = cpt.msg.depth
+    inc cpt.vmState.failedCalls
     return ok()
 
   if endowment.isZero.not:
@@ -255,6 +258,7 @@ proc create2Op(cpt: VmCpt): EvmResultVoid =
         reason = "Insufficient funds available to transfer",
         required = endowment,
         balance = senderBalance
+      inc cpt.vmState.failedCalls
       return ok()
 
   var

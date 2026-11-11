@@ -16,6 +16,8 @@ import
   eth/common/[transaction_utils, addresses],
   ../execution_api/engine_client,
   ../execution_chain/[constants, transaction, conf, version_info],
+  ../execution_chain/evm/state,
+  ../execution_chain/transaction/call_evm_rpc,
   ../execution_chain/db/core_db/memory_only,
   ../execution_chain/db/[ledger, storage_types],
   ../execution_chain/sync/wire_protocol,
@@ -195,6 +197,25 @@ const
     Push0
     Revert
   aboveTxGasCapAddress = address"0x000000000000000000000000000000000000c0df"
+  # Has no balance, so its CALL and CREATE with 1 wei fail the balance
+  # precheck before a child frame starts.
+  precheckFailerCode = evmByteCode:
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x01"
+    Push20 "0x000000000000000000000000000000000000b001"
+    Gas
+    Call
+    Pop
+    Push1 "0x00"
+    Push1 "0x00"
+    Push1 "0x01"
+    Create
+    Pop
+    Stop
+  precheckFailerAddress = address"0x000000000000000000000000000000000000ca04"
   keyStore = "tests/keystore"
   signer = address"0x0e69cde81b1aa07a45c32c6cd85d67229d36bb1b"
   contractAddress = address"0xa3b2222afa5c987da6ef773fde8d01b9f23d481f"
@@ -350,6 +371,8 @@ proc setupEnv(envFork: HardFork = MergeFork, genesisGasLimit = 0.GasInt): TestEn
     GenesisAccount(code: aboveRpcGasCapCode)
   params.genesis.alloc[aboveTxGasCapAddress] =
     GenesisAccount(code: aboveTxGasCapCode)
+  params.genesis.alloc[precheckFailerAddress] =
+    GenesisAccount(code: precheckFailerCode)
   params.genesis.alloc[signer] = GenesisAccount(balance: oneETH)
   params.genesis.alloc[create2Deployer] =
     GenesisAccount(code: create2DeployerCode, nonce: 1)
@@ -1102,6 +1125,25 @@ proc rpcMain*() =
         to: Opt.some(proberAddress))
       let gas = await client.eth_estimateGas(ec)
       check gas <= w3Qty(100_000'u64)
+
+    test "nested calls that fail their balance precheck count as failed":
+      # Gas estimation compares the failed nested calls of its executions,
+      # so a CALL or CREATE stopped by its balance precheck counts as one.
+      let
+        header = env.chain.latestHeader
+        txFrame = env.chain.txFrame(header).txFrameBegin()
+        vmState = BaseVMState.new(
+          Header(number: header.number - 1), header, env.com, txFrame)
+        args = TransactionArgs(
+          `from`: Opt.some(signer),
+          to: Opt.some(precheckFailerAddress),
+          gas: Opt.some(w3Qty(100_000'u64)))
+        res = rpcCallEvm(args, header, vmState)
+      check res.isOk
+      check not res.get.isError
+      check vmState.failedCalls == 2
+      vmState.dispose()
+      txFrame.dispose()
 
     test "eth_estimateGas with gas above the RPC gas cap and the block gas limit stays capped":
       # The block gas limit is below the 50M RPC gas cap, so the search stops

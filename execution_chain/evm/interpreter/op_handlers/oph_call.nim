@@ -328,6 +328,7 @@ proc callOp(cpt: VmCpt): EvmResultVoid =
     cpt.gasMeter.returnGas(childGasLimit)
     if newAccountCharged:
       cpt.gasMeter.creditStateGasRefund(CREATE_ACCOUNT_STATE_GAS)
+    inc cpt.vmState.failedCalls
     return ok()
 
   cpt.memory.extend(p.memInPos, p.memInLen)
@@ -338,6 +339,7 @@ proc callOp(cpt: VmCpt): EvmResultVoid =
     cpt.gasMeter.returnGas(childGasLimit)
     if newAccountCharged:
       cpt.gasMeter.creditStateGasRefund(CREATE_ACCOUNT_STATE_GAS)
+    inc cpt.vmState.failedCalls
     return ok()
 
   # Pass full reservoir to child (no 63/64 rule for state gas)
@@ -406,6 +408,7 @@ proc callCodeOp(cpt: VmCpt): EvmResultVoid =
       maximumDepth = MaxCallDepth,
       depth = cpt.msg.depth
     cpt.gasMeter.returnGas(childGasLimit)
+    inc cpt.vmState.failedCalls
     return ok()
 
   cpt.memory.extend(p.memInPos, p.memInLen)
@@ -414,6 +417,7 @@ proc callCodeOp(cpt: VmCpt): EvmResultVoid =
   let senderBalance = cpt.getBalance(p.sender)
   if senderBalance < p.value:
     cpt.gasMeter.returnGas(childGasLimit)
+    inc cpt.vmState.failedCalls
     return ok()
 
   # Pass full reservoir to child (no 63/64 rule for state gas)
@@ -481,6 +485,7 @@ proc delegateCallOp(cpt: VmCpt): EvmResultVoid =
       maximumDepth = MaxCallDepth,
       depth = cpt.msg.depth
     cpt.gasMeter.returnGas(childGasLimit)
+    inc cpt.vmState.failedCalls
     return ok()
 
   cpt.memory.extend(p.memInPos, p.memInLen)
@@ -550,6 +555,7 @@ proc staticCallOp(cpt: VmCpt): EvmResultVoid =
       maximumDepth = MaxCallDepth,
       depth = cpt.msg.depth
     cpt.gasMeter.returnGas(childGasLimit)
+    inc cpt.vmState.failedCalls
     return ok()
 
   cpt.memory.extend(p.memInPos, p.memInLen)
