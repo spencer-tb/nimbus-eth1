@@ -11,7 +11,6 @@
 
 import
   results,
-  chronicles,
   eth/common/[addresses, headers],
   web3/eth_api_types,
   ../transaction,
@@ -62,19 +61,14 @@ proc toTransaction*(vmState: BaseVMState,
     if feeCap < baseFee:
       return err("max fee per gas less than block base fee")
 
-  # Set default gas & gas price if none were set
+  # Set default gas & gas price if none were set. `globalGasCap` is only the
+  # default, an explicit gas is used as it is.
   var gasLimit = globalGasCap
   if gasLimit == 0:
     gasLimit = high(uint64) div 2
 
   if args.gas.isSome:
     gasLimit = GasInt args.gas.get()
-
-  if globalGasCap != 0 and globalGasCap < gasLimit:
-    warn "Caller gas above allowance, capping",
-      requested = gasLimit,
-      cap = globalGasCap,
-      gasLimit = globalGasCap
 
   template versionedHashes(args: TransactionArgs): seq[VersionedHash] =
     if args.blobVersionedHashes.isSome:
