@@ -49,7 +49,10 @@ proc rpcCallEvm*(
     com: CommonRef,
     parentFrame: CoreDbTxRef,
     globalGasCap = 0.GasInt,
+    noExecutionGasCap = false,
 ): Result[CallResult, string] =
+  ## With `noExecutionGasCap`, all gas is execution gas after Amsterdam
+  ## (EIP-8037), as eth_call requires.
   # TODO: globalGasCap should configurable by user
 
   let txFrame = parentFrame.txFrameBegin()
@@ -63,7 +66,7 @@ proc rpcCallEvm*(
   let
     tx = ? toTransaction(vmState, args, globalGasCap, header)
     intrinsic = tx.intrinsicGas(vmState.hardFork, args.sender)
-    params = tx.callParams(args.sender, vmState, intrinsic)
+    params = tx.callParams(args.sender, vmState, intrinsic, noExecutionGasCap)
 
   ok(runComputation(params, CallResult))
 

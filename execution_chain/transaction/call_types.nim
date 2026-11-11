@@ -31,6 +31,7 @@ type
     isCreate*         : bool              # True if this is a contract creation.
     tx*               : ptr Transaction
     intrinsic*        : IntrinsicGas
+    noExecutionGasCap*: bool              # All gas is execution gas after Amsterdam (eth_call).
 
   # Standard call result.
   CallResult* = object of RootObj

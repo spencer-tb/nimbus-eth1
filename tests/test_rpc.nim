@@ -176,6 +176,25 @@ const
     Push0
     Revert
   aboveRpcGasCapAddress = address"0x000000000000000000000000000000000000c0de"
+  # Returns the gas left at entry if it is at least 20M, above
+  # TX_MAX_GAS_LIMIT (2^24), and reverts otherwise.
+  aboveTxGasCapCode = evmByteCode:
+    Gas
+    Push4 "0x01312D00"
+    Dup2
+    Lt
+    Push1 "0x11"
+    JumpI
+    Push0
+    Mstore
+    Push1 "0x20"
+    Push0
+    Return
+    JumpDest
+    Push0
+    Push0
+    Revert
+  aboveTxGasCapAddress = address"0x000000000000000000000000000000000000c0df"
   keyStore = "tests/keystore"
   signer = address"0x0e69cde81b1aa07a45c32c6cd85d67229d36bb1b"
   contractAddress = address"0xa3b2222afa5c987da6ef773fde8d01b9f23d481f"
@@ -329,6 +348,8 @@ proc setupEnv(envFork: HardFork = MergeFork, genesisGasLimit = 0.GasInt): TestEn
     GenesisAccount(code: reservoirCatcherCode)
   params.genesis.alloc[aboveRpcGasCapAddress] =
     GenesisAccount(code: aboveRpcGasCapCode)
+  params.genesis.alloc[aboveTxGasCapAddress] =
+    GenesisAccount(code: aboveTxGasCapCode)
   params.genesis.alloc[signer] = GenesisAccount(balance: oneETH)
   params.genesis.alloc[create2Deployer] =
     GenesisAccount(code: create2DeployerCode, nonce: 1)
@@ -1536,6 +1557,25 @@ proc rpcMain*() =
         to: Opt.some(reservoirCatcherAddress))
       let gas = await client.eth_estimateGas(ec)
       check gas < w3Qty(TX_MAX_GAS_LIMIT.uint64)
+
+    test "eth_call spends all of its gas on execution":
+      # EIP-8037 caps the execution gas of a transaction at TX_MAX_GAS_LIMIT,
+      # eth_call is not capped.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveTxGasCapAddress),
+        gas: Opt.some(w3Qty(25_000_000'u64)))
+      let res = await client.eth_call(ec, "latest")
+      check UInt256.fromBytesBE(res) > TX_MAX_GAS_LIMIT.u256
+
+    test "eth_estimateGas keeps the EIP-8037 execution gas cap":
+      # As in a block, the execution gas stays below TX_MAX_GAS_LIMIT, so
+      # the contract reverts at every gas limit.
+      let ec = TransactionArgs(
+        `from`: Opt.some(signer),
+        to: Opt.some(aboveTxGasCapAddress))
+      expect RpcResponseError:
+        discard await client.eth_estimateGas(ec)
 
     env.close()
 
