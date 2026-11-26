@@ -7,9 +7,10 @@
 # This file may not be copied, modified, or distributed except according to
 # those terms.
 
-## `test_runner blocktest` and `test_runner enginetest`: run EEST blockchain
-## and blockchain engine fixtures through Nimbus's block import and Engine API
-## handler, following the client test runner interface in execution-specs
+## `test_runner blocktest`, `test_runner enginetest` and `test_runner
+## buildtest`: run EEST blockchain and blockchain engine fixtures through
+## Nimbus's block import, Engine API handler and block builder, following the
+## client test runner interface in execution-specs
 ## (`docs/running_tests/consume/client_runners.md`). Results are one JSON
 ## array on stdout, everything else goes to stderr.
 {.push raises: [].}
@@ -26,7 +27,7 @@ import
   ../../execution_api/conversions,
   eth/common/[blocks_rlp, block_access_lists, block_access_lists_rlp, headers_rlp],
   ../../execution_chain/version_info,
-  ../../execution_chain/rpc/engine_api,
+  ../../execution_chain/rpc/[engine_api, testing],
   ../../execution_chain/db/core_db/memory_only,
   ../../execution_chain/db/ledger,
   ../../execution_chain/core/chain/forked_chain,
@@ -46,6 +47,7 @@ type
   Mode = enum
     BlockTest
     EngineTest
+    BuildTest
 
   Options = object
     mode: Mode
@@ -54,6 +56,13 @@ type
     balSequential: bool
     balWithhold: bool
     balReport: bool
+
+  BuildOutcome = ref object
+    ## What `buildtest` built: the payloads Nimbus built and refused to build,
+    ## and every field of a fixture's payload in which the built one differs.
+    built: int
+    refused: int
+    mismatches: seq[JsonNode]
 
   Env = ref object
     chain: ForkedChainRef
@@ -68,16 +77,18 @@ var
     ## "R" and a JSON array of one file's results, or "E" and why the file
     ## could not be run.
 
-const usage = """Usage: test_runner blocktest|enginetest [options] PATH...
+const usage = """Usage: test_runner blocktest|enginetest|buildtest [options] PATH...
 
 Runs every fixture in the files and directories given, in one process.
 
 Options:
   --workers N       run fixture files on N threads (default 1)
   --threads N       background threads per worker for parallel execution (2+)
-  --bal-sequential  run every block on the sequential executor
+  --bal-sequential  (blocktest, enginetest) run every block on the sequential
+                    executor
   --bal-withhold    (blocktest) execute without the fixture's access list
-  --bal-report      print the executor chosen for each block on stderr
+  --bal-report      (blocktest, enginetest) print the executor chosen for each
+                    block on stderr
   --version         print the version and exit"""
 
 proc versionLine(): string =
@@ -118,10 +129,13 @@ proc prepareEnv(
 
   let env = Env(chain: ForkedChainRef.init(com))
 
-  if opts.mode == EngineTest:
+  if opts.mode in {EngineTest, BuildTest}:
     env.engine = BeaconEngineRef.new(TxPoolRef.new(env.chain))
     env.server = RpcServer.new()
     setupEngineAPI(env.engine, env.server)
+  if opts.mode == BuildTest:
+    # A fixture's payloads carry their blob transactions without blobs.
+    setupTestingRpc(env.engine, env.server, blobsOptional = true)
 
   ok(env)
 
@@ -291,9 +305,11 @@ else:
   template longPath(path: string): string =
     path
 
-template runFile(path: string, T: type, runUnit: untyped): string =
+template runFile(path: string, T: type, runUnit: untyped, build: static bool = false): string =
   ## A file that is not JSON cannot be run; a fixture in it that Nimbus cannot
-  ## read, such as one for a fork it does not know, fails on its own.
+  ## read, such as one for a fork it does not know, fails on its own. With
+  ## `build`, `runUnit` also gets the fixture's JSON and what it built, which
+  ## the result reports.
   let fixtures =
     try:
       parseFile(longPath(path))
@@ -305,6 +321,8 @@ template runFile(path: string, T: type, runUnit: untyped): string =
   var output = newJArray()
   for name, node in fixtures:
     var rejections: seq[JsonNode]
+    when build:
+      let outcome = BuildOutcome()
     let
       network = node{"network"}.getStr
       error =
@@ -313,10 +331,17 @@ template runFile(path: string, T: type, runUnit: untyped): string =
         else:
           try:
             let unit = EthJson.decode($node, T)
-            runUnit(unit, opts, taskpool, balPrefetchPool, rejections)
+            when build:
+              runUnit(unit, node, opts, taskpool, balPrefetchPool, rejections, outcome)
+            else:
+              runUnit(unit, opts, taskpool, balPrefetchPool, rejections)
           except CatchableError as exc:
             "cannot read the fixture: " & exc.msg
-    output.add fixtureResult(name, network, error, rejections)
+    var row = fixtureResult(name, network, error, rejections)
+    when build:
+      row["built"] = %outcome.built
+      row["mismatches"] = %outcome.mismatches
+    output.add row
   "R" & $output
 
 proc runBlockFile(
@@ -441,10 +466,132 @@ proc reportPayload(env: Env, opts: Options, payload: ExecutionPayload) =
     list.isSome and list.get.len > 2,
   )
 
+proc jsonEquals(a, b: JsonNode): bool =
+  ## Compares two JSON values as values rather than text: a missing field
+  ## equals null, objects compare by their fields in any order, and strings,
+  ## which carry the payload's hex, compare regardless of case.
+  let
+    aNull = a.isNil or a.kind == JNull
+    bNull = b.isNil or b.kind == JNull
+  if aNull or bNull:
+    return aNull and bNull
+  if a.kind == JObject and b.kind == JObject:
+    for key, value in a:
+      if not jsonEquals(value, b{key}):
+        return false
+    for key, value in b:
+      if not jsonEquals(a{key}, value):
+        return false
+    return true
+  if a.kind == JArray and b.kind == JArray:
+    if a.len != b.len:
+      return false
+    for i in 0 ..< a.len:
+      if not jsonEquals(a.elems[i], b.elems[i]):
+        return false
+    return true
+  if a.kind == JString and b.kind == JString:
+    return cmpIgnoreCase(a.getStr, b.getStr) == 0
+  a == b
+
+proc field(node: JsonNode, name: string): JsonNode =
+  ## The field `name` of `node`, null when it has none.
+  result = node{name}
+  if result.isNil:
+    result = newJNull()
+
+proc buildPayload(
+    env: Env, index: int, payload: PayloadItem, fixture: JsonNode,
+    build: BuildOutcome, rejections: var seq[JsonNode],
+): string =
+  ## Builds payload `index` through `testing_buildBlockV1`, on the payload's
+  ## parent and from its attributes, transactions and extra data, and records
+  ## every field of the fixture's payload in which the built one differs. The
+  ## payload's gas limit is the builder's target: `targetGasLimit` from
+  ## Amsterdam on, the configured gas limit before. A build Nimbus refuses is a
+  ## rejection. Empty unless the call itself fails.
+  let
+    payloads = fixture{"engineNewPayloads"}
+    params =
+      if payloads.isNil or payloads.kind != JArray or index >= payloads.len: nil
+      else: payloads.elems[index]{"params"}
+  if params.isNil or params.kind != JArray or params.len == 0:
+    return "payload " & $index & " has no params"
+
+  let
+    want = params.elems[0]
+    version = distinctBase payload.newPayloadVersion
+    fcuVersion = distinctBase payload.forkchoiceUpdatedVersion
+  var attrs = newJObject()
+  attrs["timestamp"] = want.field("timestamp")
+  attrs["prevRandao"] = want.field("prevRandao")
+  attrs["suggestedFeeRecipient"] = want.field("feeRecipient")
+  if not want{"withdrawals"}.isNil:
+    attrs["withdrawals"] = want{"withdrawals"}
+  # The parent beacon block root is a newPayload param from V3 on.
+  if version >= 3:
+    attrs["parentBeaconBlockRoot"] =
+      if params.len > 2: params.elems[2] else: newJNull()
+  # The slot number and the gas limit target are attributes from
+  # forkchoiceUpdatedV4 on.
+  if fcuVersion >= 4:
+    attrs["slotNumber"] = want.field("slotNumber")
+    attrs["targetGasLimit"] = want.field("gasLimit")
+  let request = newJArray()
+  request.add want.field("parentHash")
+  request.add attrs
+  request.add want.field("transactions")
+  request.add want.field("extraData")
+
+  env.chain.com.gasLimit = distinctBase payload.params.payload.gasLimit
+  let response =
+    try:
+      waitFor noCancel env.server.executeMethod("testing_buildBlockV1", JsonString($request))
+    except RpcResponseError as exc:
+      var error = $exc.code & ": " & exc.msg
+      if exc.data.string.len > 0:
+        error.add ": " & exc.data.string
+      rejections.add rejection(index, Opt.none(Hash32), error)
+      inc build.refused
+      return ""
+    except CatchableError as exc:
+      return "payload " & $index & " testing_buildBlockV1 failed: " & exc.msg
+  inc build.built
+
+  let built =
+    try:
+      parseJson(response.string)
+    except CatchableError as exc:
+      return "payload " & $index & " testing_buildBlockV1 result unreadable: " & exc.msg
+  template compare(name: string, expected, got: JsonNode) =
+    if not jsonEquals(expected, got):
+      let mismatch = newJObject()
+      mismatch["index"] = %index
+      mismatch["field"] = %name
+      mismatch["expected"] = if expected.isNil: newJNull() else: expected
+      mismatch["got"] = if got.isNil: newJNull() else: got
+      build.mismatches.add mismatch
+  # Only the fixture's fields: before Amsterdam the method returns an
+  # ExecutionPayloadV3, so a block before Cancun comes back with Cancun's
+  # fields, and the block hash already covers the header Nimbus built.
+  let got = built{"executionPayload"}
+  for name, expected in want:
+    compare(name, expected, if got.isNil: nil else: got{name})
+  # The execution requests are a newPayload param from V4 on.
+  if version >= 4:
+    compare(
+      "executionRequests",
+      if params.len > 3: params.elems[3] else: newJNull(),
+      built{"executionRequests"})
+  ""
+
 proc runEngineTest(
     env: Env, opts: Options, unit: EngineUnitEnv, genesisHash: Hash32,
-    rejections: var seq[JsonNode],
+    rejections: var seq[JsonNode], build: BuildOutcome = nil, fixture: JsonNode = nil,
 ): string =
+  ## With `build`, `buildtest`: each payload expected to be valid is first built
+  ## and compared with the fixture's, and the payloads expected to be invalid are
+  ## neither built nor sent.
   template payloads: auto = unit.engineNewPayloads
 
   if payloads.len == 0:
@@ -469,6 +616,15 @@ proc runEngineTest(
       validationError = payload.validationError
       expectValid =
         wantCode.isNone and (validationError.isNone or validationError.get().len == 0)
+
+    if not build.isNil:
+      if not expectValid:
+        continue
+      let buildError = env.buildPayload(i, payload, fixture, build, rejections)
+      if buildError.len > 0:
+        fail(buildError)
+
+    let
       response = env.newPayload(version, payload.params)
       error = responseError(response)
 
@@ -504,6 +660,10 @@ proc runEngineTest(
       if res.len > 0:
         fail("payload " & $i & " " & res)
 
+  if failure.len == 0 and not build.isNil and
+      (build.mismatches.len > 0 or build.refused > 0):
+    failure = $build.mismatches.len & " mismatched fields, " & $build.refused &
+      " refused payloads"
   if failure.len > 0:
     return failure
   if env.chain.latestHash != unit.lastblockhash:
@@ -531,6 +691,28 @@ proc runEngineFile(
     balPrefetchPool: DetachedTaskpool,
 ): string =
   runFile(path, EngineUnitEnv, runEngineUnit)
+
+proc runBuildUnit(
+    unit: EngineUnitEnv, fixture: JsonNode, opts: Options, taskpool: Taskpool,
+    balPrefetchPool: DetachedTaskpool, rejections: var seq[JsonNode],
+    build: BuildOutcome,
+): string =
+  let genesis = unit.genesisHeader().valueOr:
+    return error
+  let env = prepareEnv(unit, genesis, opts, taskpool, balPrefetchPool).valueOr:
+    return error
+  result =
+    try:
+      env.runEngineTest(opts, unit, genesis.computeBlockHash, rejections, build, fixture)
+    except CatchableError as exc:
+      "malformed fixture: " & exc.msg
+  env.close()
+
+proc runBuildFile(
+    path: string, opts: Options, taskpool: Taskpool,
+    balPrefetchPool: DetachedTaskpool,
+): string =
+  runFile(path, EngineUnitEnv, runBuildUnit, build = true)
 
 # ------------------------------------------------------------------------------
 # Paths, workers and output
@@ -606,6 +788,7 @@ proc worker(opts: Options) {.thread.} =
           case opts.mode
           of BlockTest: runBlockFile(file, opts, taskpool, balPrefetchPool)
           of EngineTest: runEngineFile(file, opts, taskpool, balPrefetchPool)
+          of BuildTest: runBuildFile(file, opts, taskpool, balPrefetchPool)
         except CatchableError as exc:
           "E" & file & ": " & exc.msg
       results.send(output)
@@ -625,6 +808,7 @@ proc parseOptions(): tuple[opts: Options, paths: seq[string]] {.raises: [IOError
   case paramStr(1)
   of "blocktest": opts.mode = BlockTest
   of "enginetest": opts.mode = EngineTest
+  of "buildtest": opts.mode = BuildTest
   of "--help", "-h":
     echo usage
     quit(0)
@@ -658,8 +842,15 @@ proc parseOptions(): tuple[opts: Options, paths: seq[string]] {.raises: [IOError
       inc i
       # The parallel executor and prefetch need a taskpool of two or more.
       opts.threads = count(i, arg, least = 2)
-    of "--bal-sequential": opts.balSequential = true
-    of "--bal-report": opts.balReport = true
+    of "--bal-sequential", "--bal-report":
+      # Nimbus builds a buildtest's blocks, deriving each access list itself.
+      if opts.mode == BuildTest:
+        stderr.writeLine arg & " applies to blocktest and enginetest only"
+        quit(2)
+      if arg == "--bal-sequential":
+        opts.balSequential = true
+      else:
+        opts.balReport = true
     of "--bal-withhold":
       if opts.mode != BlockTest:
         stderr.writeLine "--bal-withhold applies to blocktest only"
