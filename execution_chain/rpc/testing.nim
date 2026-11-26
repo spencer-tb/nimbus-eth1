@@ -34,7 +34,11 @@ proc validateBlobWrapper(
       return err("blob transaction wrapper version 0 expected before Osaka")
     validateBlobTransactionWrapper4844(ptx)
 
-proc setupTestingRpc*(ben: BeaconEngineRef, server: RpcServer) =
+proc setupTestingRpc*(ben: BeaconEngineRef, server: RpcServer, blobsOptional = false) =
+  ## With `blobsOptional`, a blob transaction may also come as an execution
+  ## payload carries it, without its blobs, commitments and proofs: the block
+  ## needs only its versioned hashes, and the blobs bundle leaves it out. Only
+  ## the client test runner turns it on.
   server.rpc(EthJson):
     proc testing_buildBlockV1(
         parentHash: Hash32,
@@ -54,7 +58,7 @@ proc setupTestingRpc*(ben: BeaconEngineRef, server: RpcServer) =
                 sender = ptx.tx.recoverSenderCached().valueOr:
                   raise newException(ValueError, "invalid transaction signature")
                 (size, id) = getEncodedLengthAndHash(ptx.tx)
-              if ptx.tx.txType == TxEip4844:
+              if ptx.tx.txType == TxEip4844 and not (blobsOptional and ptx.blobsBundle.isNil):
                 ptx.validateBlobWrapper(com, ethTime attrs.timestamp).isOkOr:
                   raise newException(ValueError, error)
               items.add TxItemRef.new(ptx, id, sender, size.uint64)
