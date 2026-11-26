@@ -362,6 +362,11 @@ proc expectedCode(payload: PayloadItem): Opt[int] =
   except ValueError:
     Opt.none(int)
 
+func apiVersion(version: uint64): Version =
+  ## The method a fixture names, `engine_newPayloadV<version>` or
+  ## `engine_forkchoiceUpdatedV<version>`: `Version` starts at `V1`, ordinal 0.
+  Version(version - 1)
+
 proc forkchoiceUpdated(env: Env,
                        version: Version,
                        state: ForkchoiceStateV1): Response[ForkchoiceUpdatedResponse] =
@@ -389,7 +394,7 @@ proc forkchoice(env: Env, version: uint64, head: Hash32): string =
     return "forkchoiceUpdated unsupported version " & $version
 
   let
-    res = env.forkchoiceUpdated(Version(version), state)
+    res = env.forkchoiceUpdated(apiVersion(version), state)
     error = responseError(res)
 
   if error.isSome:
@@ -414,7 +419,7 @@ proc newPayload(env: Env, version: uint64, param: PayloadParam): Response[Payloa
   try:
     let
       res = waitFor noCancel env.engine.newPayload(
-        Version(version), param.payload, param.versionedHashes,
+        apiVersion(version), param.payload, param.versionedHashes,
         param.parentBeaconBlockRoot, param.executionRequests)
     ResultT(result: res)
   except RpcResponseError as exc:
