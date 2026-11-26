@@ -92,8 +92,15 @@ proc setupTestingRpc*(ben: BeaconEngineRef, server: RpcServer) =
           executionRequests: bundle.executionRequests.get,
         )).JsonString
       else:
+        # Before Shanghai a block has no withdrawals, and before Cancun no blobs
+        # bundle, but the ExecutionPayloadV3 response lists both.
+        var payload = bundle.payload
+        if payload.withdrawals.isNone:
+          payload.withdrawals = Opt.some(newSeq[WithdrawalV1]())
         EthJson.encode(GetPayloadV3Response(
-          executionPayload: bundle.payload.V3,
+          executionPayload: payload.V3,
           blockValue: bundle.blockValue,
-          blobsBundle: bundle.blobsBundle.V1,
+          blobsBundle:
+            if bundle.blobsBundle.isNil: BlobsBundleV1()
+            else: bundle.blobsBundle.V1,
         )).JsonString
