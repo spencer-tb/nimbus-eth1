@@ -8,7 +8,7 @@
 # those terms.
 
 ## `test_runner blocktest`, `test_runner enginetest` and `test_runner
-## buildtest`: run EEST blockchain and blockchain engine fixtures through
+## buildtest`: run EELS blockchain and blockchain engine fixtures through
 ## Nimbus's block import, Engine API handler and block builder, following the
 ## client test runner interface in execution-specs
 ## (`docs/running_tests/consume/client_runners.md`). Results are one JSON
@@ -28,6 +28,7 @@ import
   eth/common/[blocks_rlp, block_access_lists, block_access_lists_rlp, headers_rlp],
   ../../execution_chain/version_info,
   ../../execution_chain/rpc/[engine_api, testing],
+  ../../execution_chain/constants,
   ../../execution_chain/db/core_db/memory_only,
   ../../execution_chain/db/ledger,
   ../../execution_chain/core/chain/forked_chain,
@@ -398,7 +399,7 @@ proc forkchoiceUpdated(env: Env,
   type ResultT = typeof(result)
   try:
     let res = waitFor noCancel env.engine.forkchoiceUpdated(
-                Version(version), state, Opt.none(PayloadAttributes))
+                version, state, Opt.none(PayloadAttributes))
     ResultT(result: res)
   except RpcResponseError as exc:
     ResultT(error: Opt.some(ResponseError(
@@ -543,14 +544,25 @@ proc buildPayload(
   request.add want.field("transactions")
   request.add want.field("extraData")
 
-  env.chain.com.gasLimit = distinctBase payload.params.payload.gasLimit
+  # Before forkchoiceUpdatedV4 the builder targets the configured gas limit. From
+  # V4 on that stays at the default, so only `targetGasLimit` can reach the limit.
+  env.chain.com.gasLimit =
+    if fcuVersion >= 4: DEFAULT_GAS_LIMIT.uint64
+    else: distinctBase payload.params.payload.gasLimit
   let response =
     try:
       waitFor noCancel env.server.executeMethod("testing_buildBlockV1", JsonString($request))
     except RpcResponseError as exc:
       var error = $exc.code & ": " & exc.msg
       if exc.data.string.len > 0:
-        error.add ": " & exc.data.string
+        # The router sends the handler's message as a JSON string.
+        let data =
+          try:
+            let node = parseJson(exc.data.string)
+            if node.kind == JString: node.getStr else: $node
+          except CatchableError:
+            exc.data.string
+        error.add ": " & data
       rejections.add rejection(index, Opt.none(Hash32), error)
       inc build.refused
       return ""
@@ -636,6 +648,10 @@ proc runEngineTest(
       elif wantCode.get != got:
         fail("payload " & $i & " JSON-RPC error code " & $got & ", expected " &
           $wantCode.get)
+      # A build test imports only payloads expected to be valid, and the next
+      # one builds on this.
+      if not build.isNil:
+        break
       continue
 
     let status = response.result.status
@@ -654,6 +670,8 @@ proc runEngineTest(
       fail("payload " & $i & " status " & $status & ", expected " & $want &
         (if status == PayloadExecutionStatus.invalid: ": " & response.result.validationError.get()
          else: ""))
+      if not build.isNil:
+        break
       continue
     if expectValid:
       let res = env.forkchoice(fcuVersion, blockHash)
