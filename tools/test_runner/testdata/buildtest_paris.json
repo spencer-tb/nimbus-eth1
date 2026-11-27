@@ -1,0 +1,87 @@
+{
+  "tests/frontier/eip2681_limit_account_nonce/test_nonce_reaching_max.py::test_tx_at_nonce_max_minus_one_call[fork_Paris-blockchain_test_engine_from_state_test]": {
+    "network": "Paris",
+    "lastblockhash": "0x369e9867ed323e7815a12c299bedb793cd2416b436ddd7ee9ac4f6a443e847a9",
+    "config": {
+      "network": "Paris",
+      "chainid": "0x01"
+    },
+    "pre": {
+      "0x8e2e7e6611297e0f9e92928c9229d2cc6a7059a3": {
+        "nonce": "0xfffffffffffffffe",
+        "balance": "0x033b2e3c9fd0803ce8000000",
+        "code": "0x",
+        "storage": {}
+      }
+    },
+    "genesisBlockHeader": {
+      "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+      "coinbase": "0x0000000000000000000000000000000000000000",
+      "stateRoot": "0x2418ac7e95c7335e9667a747f4c5e64ab2d71a7091a41c4cef18c50cb2178e49",
+      "transactionsTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      "receiptTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      "bloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "difficulty": "0x00",
+      "number": "0x00",
+      "gasLimit": "0x07270e00",
+      "gasUsed": "0x00",
+      "timestamp": "0x00",
+      "extraData": "0x00",
+      "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "nonce": "0x0000000000000000",
+      "baseFeePerGas": "0x07",
+      "hash": "0x76650982618914b9db0490d02ca0c94e6bb7622e2f52264751fdf57f5fda0a01"
+    },
+    "postState": {
+      "0x8e2e7e6611297e0f9e92928c9229d2cc6a7059a3": {
+        "nonce": "0xffffffffffffffff",
+        "balance": "0x033b2e3c9fd0803ce7fccbb0",
+        "code": "0x",
+        "storage": {}
+      },
+      "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba": {
+        "nonce": "0x00",
+        "balance": "0xf618",
+        "code": "0x",
+        "storage": {}
+      }
+    },
+    "engineNewPayloads": [
+      {
+        "params": [
+          {
+            "parentHash": "0x76650982618914b9db0490d02ca0c94e6bb7622e2f52264751fdf57f5fda0a01",
+            "feeRecipient": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "stateRoot": "0xc0d1502ba2ca7048a98dcd58448aa75f2442d0bd0117db87e9d608237a38babe",
+            "receiptsRoot": "0x056b23fbba480696b65fe5a59b8f2148a1299103c4f57df839233af2cf4ca2d2",
+            "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "blockNumber": "0x1",
+            "gasLimit": "0x7270e00",
+            "gasUsed": "0x5208",
+            "timestamp": "0x3e8",
+            "extraData": "0x00",
+            "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "baseFeePerGas": "0x7",
+            "blockHash": "0x369e9867ed323e7815a12c299bedb793cd2416b436ddd7ee9ac4f6a443e847a9",
+            "transactions": [
+              "0xf86988fffffffffffffffe0a8407270e0094c0f6dc9e5836f54caadbf59cc69346c508e1992b80801ca026149737f243f5550ce61fa075cd9123b9d755aa4c0596d0651b0b29f5656536a041d9b11ea82568945140e0b905f07909f5e45d411acdbe9cd9655aa2201b8b7b"
+            ]
+          }
+        ],
+        "newPayloadVersion": "1",
+        "forkchoiceUpdatedVersion": "1"
+      }
+    ],
+    "_info": {
+      "hash": "0xf02a13b3b904b09478e6ca894edaa5436037749093f025c46fb67202a1a8189d",
+      "fixture-format": "blockchain_test_engine",
+      "comment": "`execution-specs` generated test",
+      "filling-transition-tool": "2.19.0",
+      "description": "Test that a top-level CALL transaction from a sender at the highest usable\nnonce (`2**64 - 2`) executes normally, bumping the sender to the maximum\nnonce (`2**64 - 1`).",
+      "url": "https://github.com/ethereum/execution-specs/blob/e27f097ec7b3e6e8ee9c2c1873c183e8f7da7a6e/tests/frontier/eip2681_limit_account_nonce/test_nonce_reaching_max.py#L31",
+      "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2681.md",
+      "reference-spec-version": "9e393a79d9937f579acbdcb234a67869259d5a96"
+    }
+  }
+}
