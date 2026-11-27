@@ -1,6 +1,6 @@
 # test_runner
 
-Runs execution-specs (EEST) blockchain fixtures through Nimbus's block import (`blocktest`), and blockchain engine fixtures through its Engine API handler (`enginetest`) and its block builder (`buildtest`), following the client test runner interface in execution-specs (`docs/running_tests/consume/client_runners.md`).
+Runs execution-specs (EELS) blockchain fixtures through Nimbus's block import (`blocktest`), and blockchain engine fixtures through its Engine API handler (`enginetest`) and its block builder (`buildtest`), following the client test runner interface in execution-specs (`docs/running_tests/consume/client_runners.md`).
 
 ```bash
 make test_runner

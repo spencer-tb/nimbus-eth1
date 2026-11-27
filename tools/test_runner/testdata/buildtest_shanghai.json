@@ -1,0 +1,120 @@
+{
+  "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_self_destructing_account[fork_Shanghai-blockchain_test_engine]": {
+    "network": "Shanghai",
+    "lastblockhash": "0x640f79ce08864c18599a9a6f9481f37f4a5e87dab45f13d549da47ab71f34b1b",
+    "config": {
+      "network": "Shanghai",
+      "chainid": "0x01"
+    },
+    "pre": {
+      "0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff": {
+        "nonce": "0x00",
+        "balance": "0x033b2e3c9fd0803ce8000000",
+        "code": "0x",
+        "storage": {}
+      },
+      "0xf36afef4dcb45e52f80cb039335952f77cec8960": {
+        "nonce": "0x00",
+        "balance": "0x01",
+        "code": "0x",
+        "storage": {}
+      },
+      "0x5ee2ccc64ff060827c543c8a37bd0a920905f520": {
+        "nonce": "0x01",
+        "balance": "0x174876e800",
+        "code": "0x600035ff",
+        "storage": {}
+      }
+    },
+    "genesisBlockHeader": {
+      "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "uncleHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+      "coinbase": "0x0000000000000000000000000000000000000000",
+      "stateRoot": "0xc58aeae8cb550be2e476223e31a19e7334a1900c8d7b8f164d3339ae74286af4",
+      "transactionsTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      "receiptTrie": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      "bloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "difficulty": "0x00",
+      "number": "0x00",
+      "gasLimit": "0x07270e00",
+      "gasUsed": "0x00",
+      "timestamp": "0x00",
+      "extraData": "0x00",
+      "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "nonce": "0x0000000000000000",
+      "baseFeePerGas": "0x07",
+      "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      "hash": "0xe4c11aa9e9aedee6943a8732a237dc1ccb74e2b1f65b99495ce01f84fcb522ce"
+    },
+    "postState": {
+      "0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff": {
+        "nonce": "0x01",
+        "balance": "0x033b2e3c9fd0803ce7fb9434",
+        "code": "0x",
+        "storage": {}
+      },
+      "0xf36afef4dcb45e52f80cb039335952f77cec8960": {
+        "nonce": "0x00",
+        "balance": "0x174876e801",
+        "code": "0x",
+        "storage": {}
+      },
+      "0x5ee2ccc64ff060827c543c8a37bd0a920905f520": {
+        "nonce": "0x00",
+        "balance": "0x170cdc1e00",
+        "code": "0x",
+        "storage": {}
+      },
+      "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba": {
+        "nonce": "0x00",
+        "balance": "0x01538a",
+        "code": "0x",
+        "storage": {}
+      }
+    },
+    "engineNewPayloads": [
+      {
+        "params": [
+          {
+            "parentHash": "0xe4c11aa9e9aedee6943a8732a237dc1ccb74e2b1f65b99495ce01f84fcb522ce",
+            "feeRecipient": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "stateRoot": "0x15dbd1d33eba34c3194fddd53caf02807d60701b88525581e34a8cefe1c9b51e",
+            "receiptsRoot": "0x1e4d70a492ae5b022afd3a50bf09c7915a4d7732c50aaab5e77a38ad10853e88",
+            "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "blockNumber": "0x1",
+            "gasLimit": "0x7270e00",
+            "gasUsed": "0x712e",
+            "timestamp": "0xc",
+            "extraData": "0x",
+            "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "baseFeePerGas": "0x7",
+            "blockHash": "0x640f79ce08864c18599a9a6f9481f37f4a5e87dab45f13d549da47ab71f34b1b",
+            "transactions": [
+              "0xf880800a830186a0945ee2ccc64ff060827c543c8a37bd0a920905f52080a0000000000000000000000000f36afef4dcb45e52f80cb039335952f77cec896026a0b334394abff0402dc99feab7f30aaa416d6e3a56af39d06449334ae7a83e6b1fa00886af06796098a1b759906f4abcd9705eaf0bc7db7041c0d0f2ca0c4720d364"
+            ],
+            "withdrawals": [
+              {
+                "index": "0x0",
+                "validatorIndex": "0x0",
+                "address": "0x5ee2ccc64ff060827c543c8a37bd0a920905f520",
+                "amount": "0x63"
+              }
+            ]
+          }
+        ],
+        "newPayloadVersion": "2",
+        "forkchoiceUpdatedVersion": "2"
+      }
+    ],
+    "_info": {
+      "hash": "0x3dffe93cb63cd91c421d63c2d131eb014bfd1565c4d0caf04d28df6405cc62bc",
+      "fixture-format": "blockchain_test_engine",
+      "comment": "`execution-specs` generated test",
+      "filling-transition-tool": "2.19.0",
+      "description": "Test withdrawals can be done to self-destructed accounts.\n\nAccount `0x100` self-destructs and sends all its balance to `0x200`. Then,\na withdrawal is received at `0x100` with 99 wei.",
+      "url": "https://github.com/ethereum/execution-specs/blob/e27f097ec7b3e6e8ee9c2c1873c183e8f7da7a6e/tests/shanghai/eip4895_withdrawals/test_withdrawals.py#L432",
+      "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
+      "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
+    }
+  }
+}

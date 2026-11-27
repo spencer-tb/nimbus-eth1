@@ -520,7 +520,7 @@ evmstate: | build deps rocksdb
 	echo -e $(BUILD_MSG) "build/$@" && \
 		$(ENV_SCRIPT) $(NIMC) c $(NIM_PARAMS) "tools/evmstate/$@.nim"
 
-# builds the EEST blocktest and enginetest runner
+# builds the EELS blocktest, enginetest and buildtest runner
 test_runner: | build deps rocksdb
 	echo -e $(BUILD_MSG) "build/$@" && \
 		$(ENV_SCRIPT) $(NIMC) c $(NIM_PARAMS) -o:build/$@ "tools/test_runner/$@.nim"

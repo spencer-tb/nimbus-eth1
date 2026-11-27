@@ -42,13 +42,16 @@ suite "test_runner":
         events[0]["reason"].getStr() == ""
 
   test "buildtest builds valid payloads as the fixtures have them":
-    # An Amsterdam payload with its access list, and a Cancun blob transaction
-    # without its blobs, as payloads carry it.
-    let (results, exitCode) =
-      buildtest(testData / "buildtest_bal.json" & " " & testData / "buildtest_blob.json")
+    # A Paris payload, a Shanghai one with a withdrawal, an Amsterdam one with
+    # its access list, and a Cancun blob transaction without its blobs, as
+    # payloads carry it. Before Cancun the built payload has fields the
+    # fixture's lacks, which are not compared.
+    let (results, exitCode) = buildtest(
+      testData / "buildtest_paris.json" & " " & testData / "buildtest_shanghai.json" & " " &
+        testData / "buildtest_bal.json" & " " & testData / "buildtest_blob.json")
     check:
       exitCode == QuitSuccess
-      results.len == 2
+      results.len == 4
     for r in results:
       check:
         r["pass"].getBool
@@ -76,9 +79,10 @@ suite "test_runner":
       let payload = fixture["engineNewPayloads"][0]["params"][0]
       blockHash = payload["blockHash"].getStr
       payload["extraData"] = %"0x01"
-    let path = getTempDir() / "buildtest_mismatch.json"
+    let path = getTempDir() / ("buildtest_mismatch_" & $getCurrentProcessId() & ".json")
     writeFile(path, $fixtures)
     let (results, exitCode) = buildtest(path)
+    removeFile(path)
     check:
       exitCode == 1
       results.len == 1
